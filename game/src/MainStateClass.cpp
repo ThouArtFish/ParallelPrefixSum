@@ -23,22 +23,30 @@ MainState::MainState() {
 	// Create empty output texture
 	const auto out_tex = TAGTexLoader::emptyTexture("out_tex", TEX_DIMENSIONS.x, TEX_DIMENSIONS.y, PIXEL_STRIDE, { .srgb = true, .mipmap = false });
 
-	// Dispatch up sweep stage
+	// Bind textures and buffers
 	glBindImageTexture(0, in_tex.id, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8UI);
 	inter_buffer.bindToShader(1, TAGResourceManager::ShaderBufferType::SHADER_STORAGE, 0);
+	block_increment_buffer.bindToShader(2, TAGResourceManager::ShaderBufferType::SHADER_STORAGE, 0);
+	glBindImageTexture(3, out_tex.id, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8UI);
+
+	// Dispatch up sweep stage
 	TAGShaderManager::Shader compute_shader = shaders.useShader("compute_upsweep");
-	glDispatchCompute(1, TEX_DIMENSIONS.y, 1);
+	glDispatchCompute(block_increment_buffer.getMaxObjects(), TEX_DIMENSIONS.y, 1);
 
 	// Dispatch down sweep stage
-	glBindImageTexture(0, out_tex.id, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8UI);
 	compute_shader = shaders.useShader("compute_downsweep");
-	glDispatchCompute(1, TEX_DIMENSIONS.y, 1);
+	glDispatchCompute(block_increment_buffer.getMaxObjects(), TEX_DIMENSIONS.y, 1);
+
+	// Place memory barrier before rendering
 	glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
 		GL_TEXTURE_FETCH_BARRIER_BIT |
 		GL_TEXTURE_UPDATE_BARRIER_BIT);
 
-	// Unbind textures from shaders
-	glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8UI);
+	// Unbind textures and buffers
+	glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8UI);
+	inter_buffer.unbindFromShader(1, TAGResourceManager::ShaderBufferType::SHADER_STORAGE);
+	block_increment_buffer.unbindFromShader(2, TAGResourceManager::ShaderBufferType::SHADER_STORAGE);
+	glBindImageTexture(3, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8UI);
 
 	// Delete compute shaders
 	shaders.stopShader();
