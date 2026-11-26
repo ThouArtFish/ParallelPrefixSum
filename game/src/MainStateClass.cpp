@@ -1,10 +1,15 @@
 #include "../include/MainStateClass.hpp"
 
 MainState::MainState() {
+	// Fill block sum buffer with zeroes
+	std::vector<glm::uvec4> zeroes(NUM_WORK_GROUPS_X * TEX_DIMENSIONS.y);
+	block_sum_buffer.updateBuffer(zeroes);
+
 	// Compile shaders
 	shaders.addShader<ProgramType::Default>({ "hud_draw", "", TAGShaderManager::DefaultProgramType::HUD_DRAW });
 	shaders.addShader<ProgramType::Compute>(ProgramType::Compute{ "compute_upsweep", "BlellochUpSweepCompute.glsl" });
 	shaders.addShader<ProgramType::Compute>(ProgramType::Compute{ "compute_downsweep", "BlellochDownSweepCompute.glsl" });
+	shaders.addShader<ProgramType::Compute>(ProgramType::Compute{ "compute_add_block_sum", "AddBlockSumCompute.glsl" });
 
 	// Create input texture with uniform colour
 	TAGTexLoader::Info start_tex_info{ .width = TEX_DIMENSIONS.x, .height = TEX_DIMENSIONS.y, .nr_channels = PIXEL_STRIDE };
@@ -25,48 +30,53 @@ MainState::MainState() {
 
 	// Bind textures and buffers
 	glBindImageTexture(0, in_tex.id, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8UI);
-	inter_buffer.bindToShader(1, TAGResourceManager::ShaderBufferType::SHADER_STORAGE, 0);
-	block_increment_buffer.bindToShader(2, TAGResourceManager::ShaderBufferType::SHADER_STORAGE, 0);
+	inter_pixels_buffer.bindToShader(1, TAGResourceManager::ShaderBufferType::SHADER_STORAGE, 0);
+	block_sum_buffer.bindToShader(2, TAGResourceManager::ShaderBufferType::SHADER_STORAGE, 0);
 	glBindImageTexture(3, out_tex.id, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8UI);
 
 	// Dispatch up sweep stage
 	TAGShaderManager::Shader compute_shader = shaders.useShader("compute_upsweep");
-	glDispatchCompute(block_increment_buffer.getMaxObjects(), TEX_DIMENSIONS.y, 1);
+	glDispatchCompute(NUM_WORK_GROUPS_X, TEX_DIMENSIONS.y, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
 	// Dispatch down sweep stage
 	compute_shader = shaders.useShader("compute_downsweep");
-	glDispatchCompute(block_increment_buffer.getMaxObjects(), TEX_DIMENSIONS.y, 1);
+	glDispatchCompute(NUM_WORK_GROUPS_X, TEX_DIMENSIONS.y, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-	// Place memory barrier before rendering
+	// Dispatch add block sum
+	compute_shader = shaders.useShader("compute_add_block_sum");
+	glDispatchCompute(NUM_WORK_GROUPS_X, TEX_DIMENSIONS.y, 1);
 	glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
 		GL_TEXTURE_FETCH_BARRIER_BIT |
 		GL_TEXTURE_UPDATE_BARRIER_BIT);
 
 	// Unbind textures and buffers
 	glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8UI);
-	inter_buffer.unbindFromShader(1, TAGResourceManager::ShaderBufferType::SHADER_STORAGE);
-	block_increment_buffer.unbindFromShader(2, TAGResourceManager::ShaderBufferType::SHADER_STORAGE);
+	inter_pixels_buffer.unbindFromShader(1, TAGResourceManager::ShaderBufferType::SHADER_STORAGE);
+	block_sum_buffer.unbindFromShader(2, TAGResourceManager::ShaderBufferType::SHADER_STORAGE);
 	glBindImageTexture(3, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8UI);
 
 	// Delete compute shaders
 	shaders.stopShader();
 	shaders.deleteShader("compute_downsweep");
 	shaders.deleteShader("compute_upsweep");
+	shaders.deleteShader("compute_add_block_sum");
 
 	// Create quads to display textures
 	hud.addImage(in_tex);
 	hud.addQuad(
 		{
-			.position = { 0.03f, 0.1f },
-			.dimensions = { 0.45f, 0.45f },
+			.position = { 0.005f, 0.2f },
+			.dimensions = { 0.495f, 0.5f },
 			.image_name = "in_tex"
 		}
 	);
 	hud.addImage(out_tex);
 	hud.addQuad(
 		{
-			.position = { 0.53f, 0.1f },
-			.dimensions = { 0.45f, 0.45f },
+			.position = { 0.5f, 0.2f },
+			.dimensions = { 0.495f, 0.5f },
 			.image_name = "out_tex"
 		}
 	);
